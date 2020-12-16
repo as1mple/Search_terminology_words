@@ -1,78 +1,110 @@
-from text_extration import Extract
-from clean_text import *
 from pyate.term_extraction_pipeline import TermExtractionPipeline
+from nltk.tokenize import word_tokenize
+from text_extration import Extract
+from nltk.corpus import stopwords
+import pandas as pd
 import spacy
 import os
-import pandas as pd
+import re
 
-result = {}
-# Каталог из которого будем брать файлы
-directory = 'Samples for term extractor'
 
-# Получаем список файлов в переменную files
-for index, name in enumerate(os.listdir(directory)):
-    ex = Extract(f"{directory}/{name}")
-    if ex is None:
-        continue
-    text = ex.extract()
-    text = re.sub(r"[^A-Za-z.]", " ",
+class TermsExtraction:
+
+    def __init__(self, directory, nlp: spacy):
+        self.directory = directory
+        self.nlp = nlp
+        self.nlp.add_pipe(TermExtractionPipeline())
+        self.result_extract_terms = {}  # рузультат извлечение терминов из текста
+        self.cleaning_dict_terms = {}  # результат удаление корелирующих фраз
+
+    def get_terms_dict_with_text(self, text) -> dict:
+        doc = self.nlp(text)
+        return dict(doc._.combo_basic.sort_values(ascending=False))
+
+    def get_clean_terms(self):
+        return self.cleaning_dict_terms
+
+    def get_extract_terms(self):
+        return self.result_extract_terms
+
+    @staticmethod
+    def update_score(global_dict: dict, key: str, value, index_doc):
+        last_value = global_dict.get(key, 0)
+        if last_value == 0:
+            global_dict.update({key: {'weight': value,
+                                      'in_document': [index_doc]}})
+
+        elif last_value['weight'] < value:
+
+            global_dict[key]['weight'] = value
+            global_dict[key]['in_document'].append(index_doc)
+
+    def conveyor(self, remove_all_except_letter_dot, remove_stop_words):
+
+        for name in os.listdir(self.directory):
+            text = Extract(f"{self.directory}/{name}").extract()
+            if text is None:
+                continue
+
+            text = remove_stop_words(remove_all_except_letter_dot(text))
+
+            print("=" * 20)
+            self.result_extract_terms.update({name: self.get_terms_dict_with_text(text=text)})
+
+    @staticmethod
+    def duplicate(global_dict, global_dict_keys):
+        clean_terms = set()
+        for el in global_dict_keys:
+            tmp = el
+            for el1 in global_dict_keys:
+                if tmp == el1:
+                    continue
+                if len(set(tmp.lower().split()) & set(el1.lower().split())) > 0:
+                    #                 print(tmp, len(tmp), 'vs', el1, len(el1))
+                    if global_dict[el1]['weight'] > global_dict[tmp]['weight']:
+                        tmp = el1
+            clean_terms.add(tmp)
+        if len(global_dict_keys) > len(clean_terms):
+            return clean_terms, True
+        else:
+            return clean_terms, False
+
+    def cleaning(self):
+        cleaning_dict = {}
+        for index, dict_ in self.result_extract_terms.items():
+            for key, value in dict_.items():
+                self.update_score(global_dict=cleaning_dict, key=key, value=value, index_doc=index)
+
+        tmp_terms = set(list(cleaning_dict.keys()))
+        flag = True
+        while flag:
+            tmp_terms, flag = self.duplicate(global_dict=cleaning_dict, global_dict_keys=tmp_terms)
+
+        self.cleaning_dict_terms = {key: cleaning_dict[key] for key in tmp_terms}
+
+
+def remove_all_except_letter_dot_eng(text: str) -> str:
+    return re.sub(r"[^A-Za-z.]", " ",
                   text)
 
-    text = remove_stop_words_eng(text)
-    nlp = spacy.load("en_core_web_sm")
-    nlp.add_pipe(TermExtractionPipeline())
-    doc = nlp(text)
-    # doc._.combo_basic.sort_values(ascending=False).to_csv(f'save/{name}.csv')
-    print("================================================================")
-    result.update({index: dict(doc._.combo_basic.sort_values(ascending=False))})
-    # print(dict(doc._.combo_basic.sort_values(ascending=False))
-    #       )
+
+def remove_stop_words_eng(text: str) -> str:
+    stop_words = set(stopwords.words('english'))
+    word_tokens = word_tokenize(text)
+    filtered_sentence = []
+    for w in word_tokens:
+        if w not in stop_words:
+            filtered_sentence.append(w)
+
+    return " ".join(filtered_sentence)
 
 
-def update_score(global_dict: dict, key: str, value, index_doc):
-    last_value = global_dict.get(key, 0)
-    if last_value == 0:
-        global_dict.update({key: {'weight': value,
-                                  'in_document': [index_doc]}})
+extract = TermsExtraction(directory='Samples for term extractor', nlp=spacy.load("en_core_web_sm"))
+extract.conveyor(remove_all_except_letter_dot=remove_all_except_letter_dot_eng, remove_stop_words=remove_stop_words_eng)
+extract.cleaning()
 
-    elif last_value['weight'] < value:
-
-        global_dict[key]['weight'] = value
-        global_dict[key]['in_document'].append(index_doc)
-
-
-global_dict = {}
-for index, dict_ in result.items():
-
-    for key, value in dict_.items():
-        update_score(global_dict=global_dict, key=key, value=value, index_doc=index)
-
-
-def duplicate(global_dict, global_dict_keys):
-    clean_terms = set()
-    for el in global_dict_keys:
-        tmp = el
-        for el1 in global_dict_keys:
-            if tmp == el1:
-                continue
-            if len(set(tmp.lower().split()) & set(el1.lower().split())) > 1:
-                #                 print(tmp, len(tmp), 'vs', el1, len(el1))
-                if global_dict[el1]['weight'] > global_dict[tmp]['weight']:
-                    tmp = el1
-        clean_terms.add(tmp)
-    if len(global_dict_keys) > len(clean_terms):
-        return clean_terms, True
-    else:
-        return clean_terms, False
-
-
-n = set(list(global_dict.keys()))
-Flag = True
-while Flag:
-    n, Flag = duplicate(global_dict, n)
-
-result = {key: global_dict[key] for key in n}
-res = sorted(result.items(), key=lambda x: x[1]['weight'])
+res = extract.get_clean_terms()
+res = sorted(res.items(), key=lambda x: x[1]['weight'])
 res.reverse()
 res = {k: v for k, v in res}
 
@@ -80,4 +112,4 @@ data = pd.DataFrame({"term": value} for value in list(res.keys()))
 
 data['weight'] = [i['weight'] for i in list(res.values())]
 data['in_document'] = [i['in_document'] for i in list(res.values())]
-data.to_csv('save2.csv')
+data.to_csv('save.csv')

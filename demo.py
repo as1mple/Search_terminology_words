@@ -60,7 +60,6 @@ class TermsExtraction:
                 if tmp == el1:
                     continue
                 if len(set(tmp.lower().split()) & set(el1.lower().split())) > 0:
-                    #                 print(tmp, len(tmp), 'vs', el1, len(el1))
                     if global_dict[el1]['weight'] > global_dict[tmp]['weight']:
                         tmp = el1
             clean_terms.add(tmp)
@@ -68,6 +67,38 @@ class TermsExtraction:
             return clean_terms, True
         else:
             return clean_terms, False
+
+    @staticmethod
+    def duplicate_lemms(list_terms, global_dict, lemma_dict):
+        clean_terms = set()
+        for k1 in list_terms:
+            tmp = k1
+            tmp_v1 = lemma_dict[k1]
+            for k2 in list_terms:
+                v2 = lemma_dict[k2]
+                if tmp_v1 == v2:
+                    continue
+                if len(set(tmp_v1.lower().split()) & set(v2.lower().split())) > 0:
+                    if global_dict[k2]['weight'] > global_dict[k1]['weight']:
+                        tmp = k2
+                        tmp_v1 = v2
+
+            clean_terms.add(tmp)
+
+        if len(list_terms) > len(clean_terms):
+            return clean_terms, True
+        else:
+            return clean_terms, False
+
+    @staticmethod
+    def lemma_dict(nlp, text):
+        lemma_dict = {}
+        for sent in text:
+            tmp = set()
+            for word in nlp(sent.lower()):
+                tmp.add(word.lemma_)
+            lemma_dict.update({sent: " ".join(tmp)})
+        return lemma_dict
 
     def cleaning(self):
         cleaning_dict = {}
@@ -79,8 +110,17 @@ class TermsExtraction:
         flag = True
         while flag:
             tmp_terms, flag = self.duplicate(global_dict=cleaning_dict, global_dict_keys=tmp_terms)
-
         self.cleaning_dict_terms = {key: cleaning_dict[key] for key in tmp_terms}
+
+        flag = True
+
+        lemma_dict = self.lemma_dict(text=self.cleaning_dict_terms, nlp=self.nlp)
+        list_terms = list(lemma_dict.keys())
+        while flag:
+            list_terms, flag = self.duplicate_lemms(list_terms=list_terms, global_dict=self.cleaning_dict_terms,
+                                                    lemma_dict=lemma_dict)
+
+        self.cleaning_dict_terms = {key: cleaning_dict[key] for key in list_terms}
 
 
 def remove_all_except_letter_dot_eng(text: str) -> str:
@@ -104,6 +144,7 @@ extract.conveyor(remove_all_except_letter_dot=remove_all_except_letter_dot_eng, 
 extract.cleaning()
 
 res = extract.get_clean_terms()
+
 res = sorted(res.items(), key=lambda x: x[1]['weight'])
 res.reverse()
 res = {k: v for k, v in res}
